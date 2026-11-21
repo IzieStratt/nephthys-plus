@@ -356,8 +356,9 @@ _channel_ids_at = 0.0
 
 
 async def _channel_name_to_id() -> dict[str, str]:
-    """Map channel name -> ID: channels the bot can list (cached an hour), then the
-    ANCHOR_CHANNEL_IDS overrides, which always win."""
+    """Map channel name -> ID: channels the bot can list (successful lookups cached an
+    hour; failures retry on the next call), then the ANCHOR_CHANNEL_IDS overrides,
+    which always win."""
     global _channel_ids, _channel_ids_at
     if not (_channel_ids and time.time() - _channel_ids_at < _CHANNEL_CACHE_SECONDS):
         listed = await _list_channels()
