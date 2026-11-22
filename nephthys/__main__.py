@@ -14,7 +14,6 @@ from starlette.applications import Starlette
 from nephthys.tasks.close_stale import close_stale_tickets
 from nephthys.tasks.daily_stats import send_daily_stats
 from nephthys.tasks.update_helpers import update_helpers
-from nephthys.utils.anchor import ensure_latest as ensure_anchor_latest
 from nephthys.utils.delete_thread import process_queue
 from nephthys.utils.env import env
 from nephthys.utils.faq import refresh_faq_entries
@@ -22,7 +21,6 @@ from nephthys.utils.logging import parse_level_name
 from nephthys.utils.logging import send_heartbeat
 from nephthys.utils.logging import setup_otel_logging
 from nephthys.utils.logging import SlackHandler
-from nephthys.utils.nps import update_nps_anchor
 from nephthys.utils.slack import app as slack_app
 from piccolo_conf import DB
 
@@ -70,14 +68,6 @@ async def main(_app: Starlette):
             )
         else:
             logging.debug("Stale ticket closing has not been configured")
-        if env.feedback_channel_id:
-            scheduler.add_job(
-                update_nps_anchor,
-                "interval",
-                hours=1,
-                max_instances=1,
-                next_run_time=datetime.now(),
-            )
         if env.transcript.faq_canvas_id:
             scheduler.add_job(
                 refresh_faq_entries,
@@ -90,8 +80,6 @@ async def main(_app: Starlette):
         delete_msg_task = asyncio.create_task(process_queue())
         await update_helpers()
         await refresh_faq_entries()
-        if env.slack_help_channel and env.slack_help_channel != "unset":
-            asyncio.create_task(ensure_anchor_latest(env.slack_help_channel))
         handler = None
         if env.slack_app_token:
             if env.environment == "production":

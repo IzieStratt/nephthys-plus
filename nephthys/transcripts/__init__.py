@@ -14,11 +14,9 @@ from nephthys.transcripts.transcripts.hctg import Hctg
 from nephthys.transcripts.transcripts.help import Help
 from nephthys.transcripts.transcripts.identity import Identity
 from nephthys.transcripts.transcripts.jumpstart import Jumpstart
-from nephthys.transcripts.transcripts.lift_off import LiftOff
 from nephthys.transcripts.transcripts.lynx import Lynx
 from nephthys.transcripts.transcripts.midnight import Midnight
 from nephthys.transcripts.transcripts.nest import Nest
-from nephthys.transcripts.transcripts.orchard import Orchard
 from nephthys.transcripts.transcripts.outpost import Outpost
 from nephthys.transcripts.transcripts.snowglobe import Snowglobe
 from nephthys.transcripts.transcripts.stardance import Stardance
@@ -32,10 +30,9 @@ transcripts: List[Type[Transcript]] = [
     Identity,
     SummerOfMaking,
     Flavortown,
-    Jumpstart,
-    LiftOff,
     Midnight,
     Construct,
+    Jumpstart,
     Stasis,
     Hctg,
     Hcai,
@@ -53,5 +50,4 @@ transcripts: List[Type[Transcript]] = [
     Capitol,
     Terra,
     Twisted,
-    Orchard,
 ]

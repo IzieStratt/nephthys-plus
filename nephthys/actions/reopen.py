@@ -66,16 +66,15 @@ async def reopen(ticket: Ticket, reopened_by: User, client: AsyncWebClient):
         profile_pic=author_profile.profile_pic_512x(),
     )
 
-    new_ticket_ts = backend_message["ts"] if backend_message else ticket.ticket_ts
+    new_ticket_ts = backend_message["ts"]
     if not new_ticket_ts:
         logging.error(f"Invalid Slack message creation response: {backend_message}")
         raise ValueError("Invalid Slack message creation response: no ts")
-    if backend_message:
-        await Ticket.update(
-            {
-                Ticket.ticket_ts: new_ticket_ts,
-            }
-        ).where(Ticket.id == ticket.id)
+    await Ticket.update(
+        {
+            Ticket.ticket_ts: new_ticket_ts,
+        }
+    ).where(Ticket.id == ticket.id)
 
     try:
         await env.slack_client.reactions_remove(

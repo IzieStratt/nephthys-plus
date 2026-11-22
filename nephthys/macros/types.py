@@ -13,10 +13,9 @@ class Macro:
     can_run_on_closed: bool = False
     post_as_helper: bool = False
 
-    async def run(self, ticket: Ticket, helper: User, **kwargs) -> bool | None:
+    async def run(self, ticket: Ticket, helper: User, **kwargs) -> None:
         """
-        Run the macro with the given arguments. Return True if the macro already
-        removed its own trigger message (so it shouldn't be deleted again).
+        Run the macro with the given arguments.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
