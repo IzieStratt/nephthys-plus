@@ -22,6 +22,11 @@ from nephthys.actions.create_team_tag import create_team_tag_btn_callback
 from nephthys.actions.create_team_tag import create_team_tag_view_callback
 from nephthys.actions.edit_category_tag import edit_category_tag_btn_callback
 from nephthys.actions.edit_category_tag import edit_category_tag_view_callback
+from nephthys.actions.manage_anchor import approve_anchor_callback
+from nephthys.actions.manage_anchor import open_propose_anchor_modal
+from nephthys.actions.manage_anchor import propose_anchor_view_callback
+from nephthys.actions.manage_anchor import reject_anchor_callback
+from nephthys.actions.manage_anchor import toggle_anchor_callback
 from nephthys.actions.manage_macros import delete_macro_callback
 from nephthys.actions.manage_macros import macro_form_view_callback
 from nephthys.actions.manage_macros import open_add_macro_modal
@@ -44,8 +49,12 @@ from nephthys.events.message_creation import on_message
 from nephthys.events.message_deletion import on_message_deletion
 from nephthys.options.category_tags import get_category_tags
 from nephthys.options.team_tags import get_team_tags
+from nephthys.utils.anchor import handle_channel_message
 from nephthys.utils.env import env
+from nephthys.utils.nps import rating_for
+from nephthys.utils.nps import update_nps_anchor
 from nephthys.utils.performance import perf_timer
+from nephthys.utils.ticket_methods import get_question_message_link
 from nephthys.views.home import AppHomeView
 
 app = AsyncApp(token=env.slack_bot_token, signing_secret=env.slack_signing_secret)
@@ -58,6 +67,13 @@ async def handle_message(event: Dict[str, Any], client: AsyncWebClient):
         event.get("subtype") == "message_changed"
         and event["message"].get("subtype") == "tombstone"
     ) or event.get("subtype") == "message_deleted"
+
+    if event["channel"] == env.slack_help_channel and not is_message_deletion:
+        try:
+            await handle_channel_message(event)
+        except Exception:
+            # Anchor upkeep must never block ticket handling for this message.
+            logging.exception("Anchor handling failed for help-channel message")
 
     if event["channel"] == env.slack_help_channel or get_forwarded_ticket_user(event):
         async with perf_timer("Processing message event (total time)"):
@@ -97,12 +113,38 @@ async def handle_ask_ai_button(
     ack: AsyncAck, body: Dict[str, Any], client: AsyncWebClient
 ):
     await ack()
-    await ask_ai(
-        channel=body["channel"]["id"],
-        thread_ts=body["actions"][0]["value"],
+    channel = body["channel"]["id"]
+    thread_ts = body["actions"][0]["value"]
+    answered = await ask_ai(
+        channel=channel,
+        thread_ts=thread_ts,
         user_id=body["user"]["id"],
+        team_id=body["team"]["id"],
         client=client,
     )
+    if answered:
+        # Slack buttons can't be disabled, so drop the button from the message.
+        message = body.get("message", {})
+        blocks = []
+        for block in message.get("blocks", []):
+            if block.get("type") == "actions":
+                block = {
+                    **block,
+                    "elements": [
+                        el
+                        for el in block.get("elements", [])
+                        if el.get("action_id") != "ask_ai"
+                    ],
+                }
+                if not block["elements"]:
+                    continue
+            blocks.append(block)
+        await client.chat_update(
+            channel=channel,
+            ts=message.get("ts", thread_ts),
+            text=message.get("text", ""),
+            blocks=blocks,
+        )
 
 
 @app.options("tag-list")  # compat with old backend msgs
@@ -282,16 +324,12 @@ async def feedback_button(ack: AsyncAck, body: Dict[str, Any], client: AsyncWebC
         callback_id="submit-feedback",
         blocks=[
             Input(
-                "How well was your question answered?",
+                "How likely are you to recommend this help channel to a friend?",
                 block_id="rating",
                 element=StaticSelect(
                     action_id="rating",
-                    placeholder="Not well/Okay/Great",
-                    options=[
-                        Option("👎 Not well", FeedbackRating.NOT_GOOD),
-                        Option("🤷 Okay", FeedbackRating.OKAY),
-                        Option("🔥 Great", FeedbackRating.GREAT),
-                    ],
+                    placeholder="0 = not at all likely, 10 = extremely likely",
+                    options=[Option(str(n), str(n)) for n in range(11)],
                 ),
             ),
             Input(
@@ -325,11 +363,22 @@ async def submit_feedback(ack: AsyncAck, body: Dict[str, Any], client: AsyncWebC
         raise ValueError(f"Failed to find ticket ticket_id={ticket_id}")
     if not (submitted_by := await User.objects().get(User.slack_id == slack_id)):
         raise ValueError(f"Failed to find user with slack_id={slack_id}")
-    rating = FeedbackRating(rating_value)
+    score = int(rating_value)
+    rating = rating_for(score)
 
     await Feedback.objects().create(
-        ticket=ticket, created_by=submitted_by, rating=rating, text=text
+        ticket=ticket, created_by=submitted_by, rating=rating, score=score, text=text
     )
+
+    if env.feedback_channel_id:
+        try:
+            said = f' said "{text}"' if text else " left feedback"
+            await client.chat_postMessage(
+                channel=env.feedback_channel_id,
+                text=f"<@{slack_id}>{said} ({score}/10) - <{get_question_message_link(ticket)}|thread>",
+            )
+        except Exception as e:
+            logging.error(f"Failed to post feedback to channel: {e!r}")
 
     # Show a success dialog (customised to the user's feeling and if they gave textual feedback)
     thank_you_text = "Feedback submitted successfully!"
@@ -350,6 +399,7 @@ async def submit_feedback(ack: AsyncAck, body: Dict[str, Any], client: AsyncWebC
         response_action="update",
         view=success_modal.build(),
     )
+    await update_nps_anchor(repost=True)
 
 
 @app.action("add-macro")
@@ -370,3 +420,30 @@ async def delete_macro(ack: AsyncAck, body: Dict[str, Any], client: AsyncWebClie
 @app.view("macro_form")
 async def macro_form(ack: AsyncAck, body: Dict[str, Any], client: AsyncWebClient):
     await macro_form_view_callback(ack, body, client)
+
+
+@app.action("anchor-propose")
+async def anchor_propose(ack: AsyncAck, body: Dict[str, Any], client: AsyncWebClient):
+    await open_propose_anchor_modal(ack, body, client)
+
+
+@app.action("anchor-approve")
+async def anchor_approve(ack: AsyncAck, body: Dict[str, Any], client: AsyncWebClient):
+    await approve_anchor_callback(ack, body, client)
+
+
+@app.action("anchor-reject")
+async def anchor_reject(ack: AsyncAck, body: Dict[str, Any], client: AsyncWebClient):
+    await reject_anchor_callback(ack, body, client)
+
+
+@app.action("anchor-toggle")
+async def anchor_toggle(ack: AsyncAck, body: Dict[str, Any], client: AsyncWebClient):
+    await toggle_anchor_callback(ack, body, client)
+
+
+@app.view("anchor_propose_form")
+async def anchor_propose_form(
+    ack: AsyncAck, body: Dict[str, Any], client: AsyncWebClient
+):
+    await propose_anchor_view_callback(ack, body, client)

@@ -1,6 +1,7 @@
 from piccolo.columns import Boolean
 from piccolo.columns import Bytea
 from piccolo.columns import ForeignKey
+from piccolo.columns import Integer
 from piccolo.columns import LazyTableReference
 from piccolo.columns import M2M
 from piccolo.columns import OnDelete
@@ -79,6 +80,7 @@ class Ticket(Table, tablename="Ticket"):
 
     assigned_at = Timestamptz(null=True, db_column_name="assignedAt")
     first_reply_at = Timestamptz(null=True, default=None, db_column_name="firstReplyAt")
+    ai_reply_at = Timestamptz(null=True, default=None, db_column_name="aiReplyAt")
     closed_at = Timestamptz(null=True, db_column_name="closedAt")
     reopened_at = Timestamptz(null=True, db_column_name="reopenedAt")
 
@@ -177,6 +179,7 @@ class Feedback(Table, tablename="Feedback"):
         db_column_name="createdById",
     )
     rating = FeedbackRatingColumn()
+    score = Integer(null=True)
     text = Varchar(null=True, length=32000)
     created_at = Timestamptz(default=TimestamptzNow(), db_column_name="createdAt")
 
@@ -190,6 +193,63 @@ class Macro(Table, tablename="Macro"):
     post_as_helper = Boolean(default=False, db_column_name="postAsHelper")
     program = Text(null=True)
     created_at = Timestamptz(default=TimestamptzNow(), db_column_name="createdAt")
+
+
+class NpsAnchor(Table, tablename="nps_anchor"):
+    id = Serial(primary_key=True, unique=True)
+    channel_id = Text(unique=True)
+    message_ts = Text()
+
+
+class Anchor(Table, tablename="anchor"):
+    """The live anchor message kept at the bottom of a channel."""
+
+    id = Serial(primary_key=True, unique=True)
+    channel_id = Text(unique=True)
+    text = Text()
+    enabled = Boolean(default=False)
+    message_ts = Text(null=True)
+    posted_at = Timestamptz(null=True)
+    created_at = Timestamptz(default=TimestamptzNow())
+
+
+class AnchorProposal(Table, tablename="anchor_proposal"):
+    """A pending change to a channel's anchor, awaiting helper approvals.
+
+    At most one proposal exists per channel at a time; a new one replaces it.
+    """
+
+    id = Serial(primary_key=True, unique=True)
+    channel_id = Text(unique=True)
+    text = Text()
+    enabled = Boolean(default=True)
+    proposer = Text()
+    created_at = Timestamptz(default=TimestamptzNow())
+
+
+class AnchorApproval(Table, tablename="anchor_approval"):
+    # The migration adds a composite UNIQUE (proposal_id, approver) so a helper can't
+    # approve the same proposal twice; Piccolo can't express a composite unique
+    # constraint on the table class, so it lives only in the migration SQL.
+    id = Serial(primary_key=True, unique=True)
+    proposal = ForeignKey(
+        references=AnchorProposal,
+        db_column_name="proposal_id",
+        on_delete=OnDelete.cascade,
+    )
+    approver = Text()
+    created_at = Timestamptz(default=TimestamptzNow())
+
+
+class HelperToken(Table, tablename="helper_token"):
+    id = Serial(primary_key=True, unique=True)
+    user = ForeignKey(
+        references=User,
+        db_column_name="user_id",
+        unique=True,
+    )
+    access_token = Text()
+    created_at = Timestamptz(default=TimestamptzNow())
 
 
 class APIKey(Table, tablename="api_key"):
